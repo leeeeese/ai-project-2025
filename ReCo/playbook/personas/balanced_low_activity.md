@@ -1,8 +1,8 @@
+````markdown
 #균형·저활동·주의형 (Balanced/Low-Activity/Caution) | 활동 낮음 · 초기 셀러
 
 ---
 
-````markdown
 ## 1. 핵심 특징
 
 - 거래 참여는 하지만 **활동량이 낮고 응답도 느린 편**
