@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple
 from statistics import median, mean
 from urllib.parse import urlparse
+from openai import OpenAI
 
 # === 설정 ===============================================================
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./used_pricer.db")
@@ -38,7 +39,6 @@ def extract_product_query(title: str, brand: Optional[str] = None) -> str:
     if not OPENAI_API_KEY:
         return " ".join(t.split()[:6])
     try:
-        from openai import OpenAI
         client = OpenAI(api_key=OPENAI_API_KEY)
         prompt = (
             "상품명에서 불필요한 정보를 제거하고 핵심 키워드만 남겨라. "
