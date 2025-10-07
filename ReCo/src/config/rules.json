@@ -1,0 +1,56 @@
+{
+  "persona_thresholds": {
+    "min_confidence": 0.6,
+    "max_distance": 50.0,
+    "fallback_persona": "hybrid_trade"
+  },
+  "matching_weights": {
+    "trust_safety": 0.24,
+    "quality_condition": 0.18,
+    "remote_transaction": 0.18,
+    "activity_responsiveness": 0.22,
+    "price_flexibility": 0.18
+  },
+  "persona_rules": {
+    "trust_safety_pro": {
+      "min_trust_safety": 75,
+      "min_confidence": 0.7
+    },
+    "high_quality_new": {
+      "min_quality_condition": 80,
+      "min_confidence": 0.7
+    },
+    "fast_shipping_online": {
+      "min_remote_transaction": 70,
+      "min_confidence": 0.6
+    },
+    "local_offline": {
+      "max_remote_transaction": 30,
+      "min_confidence": 0.6
+    },
+    "negotiation_friendly": {
+      "min_price_flexibility": 80,
+      "min_confidence": 0.6
+    },
+    "power_seller": {
+      "min_activity_responsiveness": 85,
+      "min_confidence": 0.7
+    },
+    "responsive_kind": {
+      "min_activity_responsiveness": 80,
+      "min_trust_safety": 60,
+      "min_confidence": 0.6
+    },
+    "niche_specialist": {
+      "min_quality_condition": 70,
+      "min_confidence": 0.6
+    },
+    "balanced_low_activity": {
+      "max_activity_responsiveness": 40,
+      "min_confidence": 0.5
+    },
+    "hybrid_trade": {
+      "min_confidence": 0.4
+    }
+  }
+}

@@ -1,174 +1,208 @@
 """
-상품 매칭 Agent
-검색 쿼리와 페르소나를 바탕으로 상품을 매칭합니다.
+ProductMatching Agent
+사용자 persona ↔ 판매자 persona ↔ 상품 피처 매칭
+입력: persona, seller_features → 출력: seller_item_scores
 """
 
-import time
-from typing import List, Dict, Any
-from ..core.state import RecommendationState, ProductMatch, PersonaVector, MATCHING_WEIGHTS
+import numpy as np
+from typing import List, Dict, Any, Optional, Tuple
+from ..core.state import RecommendationState, PersonaVector, PersonaType, MATCHING_WEIGHTS
+from ..services.database_service import DatabaseService
 
 
-def calculate_persona_score(user_vector: PersonaVector, seller_vector: PersonaVector) -> float:
-    """사용자와 판매자 간의 페르소나 매칭 점수 계산"""
-    score = 0.0
-    total_weight = 0.0
+class ProductMatching:
+    """상품 매칭기"""
 
-    for key, weight in MATCHING_WEIGHTS.items():
-        if key in user_vector and key in seller_vector:
-            # 점수 계산: w_k * (1 - |u_k - s_k| / 100)
-            diff = abs(user_vector[key] - seller_vector[key])
-            match_score = weight * (1 - diff / 100)
-            score += match_score
-            total_weight += weight
+    def __init__(self):
+        self.db_service = DatabaseService()
 
-    return score / total_weight if total_weight > 0 else 0.0
+    def match_user_seller_persona(self, user_persona: PersonaVector, sellers: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """1단계: 사용자 페르소나 ↔ 판매자 페르소나 매칭"""
+        seller_scores = []
 
+        for seller in sellers:
+            seller_vector = seller["persona_vector"]
 
-def calculate_text_match_score(query: str, product_title: str, keywords: List[str]) -> float:
-    """텍스트 매칭 점수 계산"""
-    query_lower = query.lower()
-    title_lower = product_title.lower()
+            # 페르소나 매칭 점수 계산
+            persona_score = self._calculate_persona_score(
+                user_persona, seller_vector)
 
-    # 키워드 매칭 점수
-    keyword_matches = sum(1 for keyword in keywords if keyword in title_lower)
-    keyword_score = keyword_matches / len(keywords) if keywords else 0.0
+            # 추가 판매자 특성 점수
+            seller_quality_score = self._calculate_seller_quality_score(seller)
 
-    # 전체 쿼리 매칭 점수
-    query_words = query_lower.split()
-    query_matches = sum(1 for word in query_words if word in title_lower)
-    query_score = query_matches / len(query_words) if query_words else 0.0
+            # 최종 판매자 점수 (가중 평균)
+            final_score = 0.7 * persona_score + 0.3 * seller_quality_score
 
-    # 가중 평균
-    return 0.7 * keyword_score + 0.3 * query_score
+            seller_scores.append({
+                "seller_id": seller["seller_id"],
+                "seller_name": seller["seller_name"],
+                "persona_score": persona_score,
+                "quality_score": seller_quality_score,
+                "final_score": final_score,
+                "persona_vector": seller_vector,
+                "total_sales": seller["total_sales"],
+                "avg_rating": seller["avg_rating"],
+                "response_time_hours": seller["response_time_hours"]
+            })
 
+        # 점수 순으로 정렬
+        seller_scores.sort(key=lambda x: x["final_score"], reverse=True)
 
-def mock_database_search(search_query: Dict[str, Any], persona_type: str) -> List[Dict[str, Any]]:
-    """데이터베이스 검색 (임시 구현)"""
-    # 실제로는 MySQL에서 상품 데이터를 조회해야 함
-    # 현재는 목업 데이터 반환
+        return seller_scores
 
-    mock_products = [
-        {
-            "product_id": "1",
-            "seller_id": "seller_1",
-            "title": "아이폰 14 Pro Max 256GB 새상품",
-            "price": 1200000,
-            "category": "스마트폰",
-            "condition": "새상품",
-            "location": "서울 강남구",
-            "seller_vector": {
-                "trust_safety": 80,
-                "quality_condition": 90,
-                "remote_transaction": 70,
-                "activity_responsiveness": 85,
-                "price_flexibility": 30
-            }
-        },
-        {
-            "product_id": "2",
-            "seller_id": "seller_2",
-            "title": "맥북 프로 16인치 M2 칩",
-            "price": 2500000,
-            "category": "노트북",
-            "condition": "중고",
-            "location": "서울 서초구",
-            "seller_vector": {
-                "trust_safety": 60,
-                "quality_condition": 70,
-                "remote_transaction": 80,
-                "activity_responsiveness": 90,
-                "price_flexibility": 50
-            }
-        },
-        {
-            "product_id": "3",
-            "seller_id": "seller_3",
-            "title": "나이키 에어맥스 270 운동화",
-            "price": 150000,
-            "category": "신발",
-            "condition": "거의새것",
-            "location": "부산 해운대구",
-            "seller_vector": {
-                "trust_safety": 70,
-                "quality_condition": 60,
-                "remote_transaction": 60,
-                "activity_responsiveness": 70,
-                "price_flexibility": 80
-            }
+    def match_seller_product_features(self, seller_scores: List[Dict[str, Any]], products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """2단계: 판매자 ↔ 상품 피처 매칭"""
+        seller_item_scores = []
+
+        for seller_score in seller_scores:
+            seller_id = seller_score["seller_id"]
+            seller_products = [
+                p for p in products if p["seller_id"] == seller_id]
+
+            for product in seller_products:
+                # 상품 피처 점수 계산
+                product_feature_score = self._calculate_product_feature_score(
+                    product)
+
+                # 판매자 점수와 상품 점수 결합
+                final_item_score = 0.6 * \
+                    seller_score["final_score"] + 0.4 * product_feature_score
+
+                seller_item_scores.append({
+                    "product_id": product["product_id"],
+                    "seller_id": seller_id,
+                    "seller_name": seller_score["seller_name"],
+                    "title": product["title"],
+                    "price": product["price"],
+                    "category": product["category"],
+                    "condition": product["condition"],
+                    "location": product["location"],
+                    "description": product["description"],
+                    "seller_persona_score": seller_score["persona_score"],
+                    "seller_quality_score": seller_score["quality_score"],
+                    "product_feature_score": product_feature_score,
+                    "final_item_score": final_item_score,
+                    "seller_rating": seller_score["avg_rating"],
+                    "view_count": product["view_count"],
+                    "like_count": product["like_count"]
+                })
+
+        # 최종 점수 순으로 정렬
+        seller_item_scores.sort(
+            key=lambda x: x["final_item_score"], reverse=True)
+
+        return seller_item_scores
+
+    def _calculate_persona_score(self, user_vector: PersonaVector, seller_vector: PersonaVector) -> float:
+        """사용자와 판매자 간의 페르소나 매칭 점수 계산"""
+        score = 0.0
+        total_weight = 0.0
+
+        for key, weight in MATCHING_WEIGHTS.items():
+            if key in user_vector and key in seller_vector:
+                # 점수 계산: w_k * (1 - |u_k - s_k| / 100)
+                diff = abs(user_vector[key] - seller_vector[key])
+                match_score = weight * (1 - diff / 100)
+                score += match_score
+                total_weight += weight
+
+        return score / total_weight if total_weight > 0 else 0.0
+
+    def _calculate_seller_quality_score(self, seller: Dict[str, Any]) -> float:
+        """판매자 품질 점수 계산"""
+        # 평점 기반 점수 (0-1)
+        rating_score = min(seller["avg_rating"] / 5.0, 1.0)
+
+        # 판매량 기반 점수 (0-1)
+        sales_score = min(seller["total_sales"] / 1000.0, 1.0)
+
+        # 응답 시간 기반 점수 (0-1, 빠를수록 높음)
+        response_score = max(0, 1 - (seller["response_time_hours"] / 24.0))
+
+        # 가중 평균
+        return 0.5 * rating_score + 0.3 * sales_score + 0.2 * response_score
+
+    def _calculate_product_feature_score(self, product: Dict[str, Any]) -> float:
+        """상품 피처 점수 계산"""
+        # 조회수 기반 점수 (0-1)
+        view_score = min(product["view_count"] / 1000.0, 1.0)
+
+        # 좋아요 기반 점수 (0-1)
+        like_score = min(product["like_count"] / 100.0, 1.0)
+
+        # 상품 상태 기반 점수
+        condition_scores = {
+            "새상품": 1.0,
+            "거의새것": 0.8,
+            "중고": 0.6,
+            "사용감있음": 0.4
         }
-    ]
+        condition_score = condition_scores.get(product["condition"], 0.5)
 
-    # 필터 적용
-    filtered_products = []
-    for product in mock_products:
-        if search_query["filters"].get("price_min") and product["price"] < search_query["filters"]["price_min"]:
-            continue
-        if search_query["filters"].get("price_max") and product["price"] > search_query["filters"]["price_max"]:
-            continue
-        if search_query["filters"].get("category") and product["category"] != search_query["filters"]["category"]:
-            continue
-        if search_query["filters"].get("location") and search_query["filters"]["location"] not in product["location"]:
-            continue
+        # 가중 평균
+        return 0.4 * view_score + 0.3 * like_score + 0.3 * condition_score
 
-        filtered_products.append(product)
+    def get_products_for_matching(self, filters: Optional[Dict[str, Any]] = None) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """매칭을 위한 판매자와 상품 데이터 조회"""
+        # 실제 DB에서 데이터 조회 (현재는 목업 사용)
+        try:
+            sellers = self.db_service.get_sellers_with_persona(limit=50)
+            seller_ids = [s["seller_id"] for s in sellers]
+            products = self.db_service.get_products_by_sellers(
+                seller_ids, filters)
+        except Exception as e:
+            print(f"DB 조회 실패, 목업 데이터 사용: {e}")
+            sellers = self.db_service.get_mock_sellers()
+            seller_ids = [s["seller_id"] for s in sellers]
+            products = self.db_service.get_mock_products(seller_ids)
 
-    return filtered_products
+        return sellers, products
 
 
 def product_matching_node(state: RecommendationState) -> RecommendationState:
     """상품 매칭 노드"""
     try:
-        search_query = state.get("search_query")
         persona_classification = state.get("persona_classification")
+        search_query = state.get("search_query")
 
-        if not search_query or not persona_classification:
-            raise ValueError("검색 쿼리 또는 페르소나 분류가 완료되지 않았습니다.")
+        if not persona_classification:
+            raise ValueError("페르소나 분류가 완료되지 않았습니다.")
 
-        # 데이터베이스에서 상품 검색
-        products = mock_database_search(
-            search_query, persona_classification["persona_type"])
+        # 필터 추출
+        filters = search_query.get("filters", {}) if search_query else {}
 
-        # 각 상품에 대해 매칭 점수 계산
-        product_matches = []
-        user_vector = persona_classification["vector"]
+        # ProductMatching 인스턴스 생성
+        matcher = ProductMatching()
 
-        for product in products:
-            # 텍스트 매칭 점수
-            text_score = calculate_text_match_score(
-                search_query["enhanced_query"],
-                product["title"],
-                search_query["keywords"]
-            )
+        # 1. 판매자와 상품 데이터 조회
+        sellers, products = matcher.get_products_for_matching(filters)
 
-            # 페르소나 매칭 점수
-            persona_score = calculate_persona_score(
-                user_vector, product["seller_vector"])
+        if not sellers or not products:
+            raise ValueError("매칭할 판매자나 상품이 없습니다.")
 
-            # 전체 매칭 점수 (가중 평균)
-            total_score = 0.6 * text_score + 0.4 * persona_score
+        # 2. 사용자 페르소나 ↔ 판매자 페르소나 매칭
+        user_persona = persona_classification["vector"]
+        seller_scores = matcher.match_user_seller_persona(
+            user_persona, sellers)
 
-            product_match = ProductMatch(
-                product_id=product["product_id"],
-                seller_id=product["seller_id"],
-                title=product["title"],
-                price=product["price"],
-                category=product["category"],
-                condition=product["condition"],
-                location=product["location"],
-                match_score=total_score,
-                persona_score=persona_score
-            )
-
-            product_matches.append(product_match)
+        # 3. 판매자 ↔ 상품 피처 매칭
+        seller_item_scores = matcher.match_seller_product_features(
+            seller_scores, products)
 
         # 결과를 상태에 저장
-        state["product_matches"] = product_matches
+        state["seller_item_scores"] = seller_item_scores
         state["current_step"] = "products_matched"
         state["completed_steps"].append("product_matching")
 
-        print(f"상품 매칭 완료: {len(product_matches)}개 상품")
-        for match in product_matches[:3]:  # 상위 3개만 출력
-            print(f"  - {match['title']} (점수: {match['match_score']:.3f})")
+        print(f"상품 매칭 완료: {len(seller_item_scores)}개 상품")
+        print(f"판매자 매칭: {len(seller_scores)}개 판매자")
+
+        # 상위 5개 결과 출력
+        for i, item in enumerate(seller_item_scores[:5], 1):
+            print(
+                f"  {i}. {item['title']} (점수: {item['final_item_score']:.3f})")
+            print(
+                f"     판매자: {item['seller_name']} (페르소나: {item['seller_persona_score']:.3f})")
 
     except Exception as e:
         state["error_message"] = f"상품 매칭 중 오류: {str(e)}"

@@ -62,14 +62,15 @@ def create_initial_state(user_input: dict, session_id: str) -> RecommendationSta
     return {
         "user_input": user_input,
         "persona_classification": None,
-        "search_query": None,
-        "product_matches": None,
-        "ranking_result": None,
-        "sql_query": None,
+        "seller_item_scores": None,  # ProductMatching 출력
+        "final_item_scores": None,   # Ranker 출력
+        "sql_query": None,           # QueryGenerator 출력
+        "ranking_explanation": None, # Ranker 설명
         "current_step": "start",
         "completed_steps": [],
         "error_message": None,
         "session_id": session_id,
         "timestamp": time.time(),
-        "execution_time": None
+        "execution_time": None,
+        "execution_start_time": time.time()
     }
